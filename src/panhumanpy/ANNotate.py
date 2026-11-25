@@ -652,10 +652,12 @@ class AzimuthNN_base(AutoloadInferenceTools):
 
         self.processed_outputs = {
             'full_hierarchical_labels': combined_labels,
+            'full_hierarchical_label_matrix': output_processing_class._labels_predicted,
+            'full_hierarchical_confidence': output_processing_class._labels_prob,
             'level_zero_labels': level_zero_labels,
             'final_level_labels': final_level_labels,
             'final_level_confidence': final_level_prob,
-            'full_consistent_hierarchy': full_consistent_hierarchy
+            'full_consistent_hierarchy': full_consistent_hierarchy,
         }
 
         if mode=='detailed':
@@ -1018,20 +1020,44 @@ class AzimuthNN_base(AutoloadInferenceTools):
             raise RuntimeError("num_cells not found")
 
         if self.processed_outputs and len(self.processed_outputs) > 0:
+            # TODO: improve this hacky design
+            counter = 0
             for col_idx, (meta_col, values) in enumerate(
                 self.processed_outputs.items()
             ):
-                if len(values) != self.num_cells:
-                    raise ValueError(
-                        f"Column {meta_col} has {len(values)} values but "
-                        f"expected {self.num_cells}"
+                col_idx += counter
+                if hasattr(values, 'shape') and len(values.shape) == 2 and values.shape[1] > 1:
+                    counter += values.shape[1] - 1
+                    if isinstance(values, np.ndarray):
+                        # iterating over values yields row vectors,
+                        # so transpose first
+                        cols = [
+                            (f'{meta_col}_{i}', vec)
+                            for i, vec in enumerate(values.T, col_idx)
+                        ]
+                    elif isinstance(values, pd.DataFrame):
+                        print('pd.DataFrame')
+                        # iterating over values yields column names
+                        cols = [
+                            (f'{meta_col}_{i}', values[label])
+                            for i, label in enumerate(values, col_idx)
+                        ]
+                    else:
+                        raise TypeError(f'Unsupported type: {type(values)}')
+                else:
+                    cols = [(meta_col, values)]
+                for col_label, vector in cols:
+                    if len(vector) != self.num_cells:
+                        raise ValueError(
+                            f"Column {col_label} has {len(vector)} values but "
+                            f"expected {self.num_cells}"
+                        )
+                    self.cells_meta = insert_col(
+                        self.cells_meta,
+                        col_idx,
+                        col_label,
+                        vector
                     )
-                self.cells_meta = insert_col(
-                    self.cells_meta, 
-                    col_idx,
-                    meta_col,
-                    values
-                )
 
         if (
             len(self._azimuth_refined_labels)
@@ -1105,6 +1131,8 @@ class AzimuthNN_base(AutoloadInferenceTools):
             features_meta_coerced,
             embeddings = all_embeddings
         )
+        adata_obj.obsm['azimuth_full_hierarchical_labels'] = self.processed_outputs['full_hierarchical_label_matrix']
+        adata_obj.obsm['azimuth_full_hierarchical_confidence'] = self.processed_outputs['full_hierarchical_confidence']
 
         if save_path:
             if os.path.exists(save_path):
@@ -2156,54 +2184,3 @@ def annotate():
 
 if __name__=="__main__":
     annotate()
-
-
-
-
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-
-
-
-
-
-    
-
-    
